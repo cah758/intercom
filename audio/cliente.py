@@ -28,8 +28,15 @@ def record(stream, CHUNK):
     while True:
         data = stream.read(CHUNK)
         trama = np.asarray(np.fromstring(data, np.int16))
-
-
+        #print('--------------------------------------------------')
+        #print('Trama')
+        #print('--------------------------------------------------')
+        #print(trama)
+        filtrado = com.low_pass_filter(trama)
+        #print('--------------------------------------------------')
+        #print('Filtrado')
+        #print('--------------------------------------------------')
+        #print(filtrado)
 
         real, imaginario = com.trasformada(trama)
 
@@ -44,21 +51,15 @@ def record(stream, CHUNK):
         XI = com.denormalizar(list(imagine.tobytes()), False)
         complejo = com.unir(XR, XI)
 
-        lista = []
-        otra = []
 
-        for elemento in  range(0, int(len(complejo)/2)):
-            lista.append(complejo[elemento])
-        for elem in lista:
-            otra.append(elem.conjugate())
-
-        for conjugado in otra:
-            lista.append(conjugado)
-        inversa = fourier.ifft(lista)
+        inversa = fourier.ifft(complejo)
         #terminamos de comprimir
                 ##Comenzamos a comprimir
-        filtrado = com.low_pass_filter(np.int16(inversa.real))
-        frames.append(filtrado)
+        #print('--------------------------------------------------')
+        #print('Inversa')
+        #print('--------------------------------------------------')
+        #print(np.int16(inversa.real))
+        frames.append(np.int16(inversa.real))
 
 if __name__ == "__main__":
     CHUNK = 1024
