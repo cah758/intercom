@@ -1,50 +1,53 @@
-import pyaudio
 import socket
 from threading import Thread
+import pyaudio
 import numpy as np
 
-frames = []
+FORMAT = pyaudio.paInt16
+CHUNK = 1024
+CHANNELS = 2
+RATE = 44100
 
-def udpStream(CHUNK):
+P = pyaudio.PyAudio()
+
+OUTPUT_STREAM = P.open(format=FORMAT,
+                channels = CHANNELS,
+                rate = RATE,
+                output = True,
+                frames_per_buffer = CHUNK,
+                )
+
+FRAMES = []
+
+def udp_stream():
 
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(("127.0.0.1", 12345))
 
     while True:
-        soundData, addr = udp.recvfrom(CHUNK * CHANNELS *2)
-        frames.append(soundData)
+        sound_data, addr = udp.recvfrom(CHUNK * CHANNELS *2)
+        FRAMES.append(sound_data)
 
     udp.close()
 
-def play(stream, CHUNK):
-    BUFFER = 10
+def play():
+    buffer = 10
     while True:
-            if len(frames) == BUFFER:
+            if len(FRAMES) == buffer:
                 while True:
-                    if len(frames)>0:
-                        data = frames.pop(0)
-                        stream.write(np.asarray(np.fromstring(data, np.int16)), CHUNK)
+                    if len(FRAMES)>0:
+                        data = FRAMES.pop(0)
+                        OUTPUT_STREAM.write(np.fromstring(data, np.int16), CHUNK)
 
-if __name__ == "__main__":
-    FORMAT = pyaudio.paInt16
-    CHUNK = 1024
-    CHANNELS = 2
-    RATE = 44100
+def main():
+    t_s = Thread(target = udp_stream)
+    t_p = Thread(target = play)
+    t_s.setDaemon(True)
+    t_p.setDaemon(True)
+    t_s.start()
+    t_p.start()
+    t_s.join()
+    t_p.join()
 
-    p = pyaudio.PyAudio()
-
-    stream = p.open(format=FORMAT,
-                    channels = CHANNELS,
-                    rate = RATE,
-                    output = True,
-                    frames_per_buffer = CHUNK,
-                    )
-
-    Ts = Thread(target = udpStream, args=(CHUNK,))
-    Tp = Thread(target = play, args=(stream, CHUNK,))
-    Ts.setDaemon(True)
-    Tp.setDaemon(True)
-    Ts.start()
-    Tp.start()
-    Ts.join()
-    Tp.join()
+if __name__ == '__main__':
+    main()

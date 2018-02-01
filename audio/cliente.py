@@ -1,87 +1,94 @@
-import pyaudio
 import socket
 from threading import Thread
-import pywt as wt
+from io import BytesIO
+import pyaudio
 import numpy as np
+import numpy.fft as fourier
+from PIL import Image
 import compresor as com
 
-from scipy.fftpack import fft, ifft
-import numpy.fft as fourier
-from time import time
-from PIL import Image
-from io import BytesIO
-from heapq import merge
+CHUNK = 1024
+FORMAT = pyaudio.paInt16
+CHANNELS = 2
+RATE = 44100
 
-frames = []
-ITERACIONESDWT = 9
+P = pyaudio.PyAudio()
 
-def udpStream():
+INPUT_STREAM = P.open(format = FORMAT,
+                channels = CHANNELS,
+                rate = RATE,
+                input = True,
+                frames_per_buffer = CHUNK,
+                )
+                
+FRAMES = []
+
+def upd_stream():
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     while True:
-        if len(frames) > 0:
-            udp.sendto(frames.pop(0), ("127.0.0.1", 12345))
+        if len(FRAMES) > 0:
+            udp.sendto(FRAMES.pop(0).copy(order='C'), ("127.0.0.1", 12345))
 
     udp.close()
 
-def record(stream, CHUNK):
+def record():
     while True:
-        data = stream.read(CHUNK)
-        trama = np.asarray(np.fromstring(data, np.int16))
-        #print('--------------------------------------------------')
-        #print('Trama')
-        #print('--------------------------------------------------')
-        #print(trama)
-        filtrado = com.low_pass_filter(trama)
-        #print('--------------------------------------------------')
-        #print('Filtrado')
-        #print('--------------------------------------------------')
-        #print(filtrado)
+        # RECEPCIÓN DE DATOS
+        # Se almacenan los bytes de audio a través del stream de entrada
+        data = INPUT_STREAM.read(CHUNK)
+        # Se transforman los bytes a enteros de 16 bits
+        trama = np.fromstring(data, np.int16)
 
-        real, imaginario = com.trasformada(trama)
+        # TRANSFORMADA
+        # Se obtienen los coeficientes complejos de la FFT
+        real, imaginario = com.transformada(trama)
 
-        XRN = com.normalizar(real, True)
-        XRI = com.normalizar(imaginario, False)
+        # CODIFICACIÓN
+        # Se normalizan los valores reales e imaginarios para que estén 
+        # comprendidos entre 0 y 255
+        xrn = com.normalizar(real, True)
+        xin = com.normalizar(imaginario, False)
 
-        im_R = com.comprimirImagen(XRN)
-        im_I = com.comprimirImagen(XRI)
-        imagine = Image.open(BytesIO(im_I.getvalue()))
-        reale  = imagine = Image.open(BytesIO(im_R.getvalue()))
-        XR = com.denormalizar(list(reale.tobytes()), True)#np.array(imagen)[0])#XRN, True)
-        XI = com.denormalizar(list(imagine.tobytes()), False)
-        complejo = com.unir(XR, XI)
+        # COMPRESIÓN
+        # Se comprimen los valores normalizados en una imagen equivalente.
+        # Estas imágenes son lo que se debería enviar a través del socket,
+        # además de los máximos y mínimos reales e imaginarios obtenidos 
+        # en la normalización.
+        im_r = com.comprimir_imagen(xrn)
+        im_i = com.comprimir_imagen(xin)
 
+        # DECOMPRESIÓN
+        # Se descomprimen las imágenes.
+        reale  = Image.open(BytesIO(im_r.getvalue()))
+        imagine = Image.open(BytesIO(im_i.getvalue()))
+        
+        # DECODIFICACIÓN
+        # Se desnormalizan.
+        xr = com.denormalizar(list(reale.tobytes()), True)
+        xi = com.denormalizar(list(imagine.tobytes()), False)
+        # Se unen los valores reales con los imaginarios.
+        complejo = com.unir(xr, xi)
 
+        # DESHACER TRANSFORMADA
+        # Se realiza la inversa de la FFT para obtener los valores iniciales.
         inversa = fourier.ifft(complejo)
-        #terminamos de comprimir
-                ##Comenzamos a comprimir
-        #print('--------------------------------------------------')
-        #print('Inversa')
-        #print('--------------------------------------------------')
-        #print(np.int16(inversa.real))
-        frames.append(np.int16(inversa.real))
-
-if __name__ == "__main__":
-    CHUNK = 1024
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 2
-    RATE = 44100
-
-    p = pyaudio.PyAudio()
-
-    stream = p.open(format = FORMAT,
-                    channels = CHANNELS,
-                    rate = RATE,
-                    input = True,
-                    frames_per_buffer = CHUNK,
-                    )
+        
+        # Incluímos en los FRAMES a enviar a través del socket lo obtenido 
+        # en la inversa de la FFT.
+        FRAMES.append(inversa.real)
 
 
-    Tr = Thread(target = record, args = (stream, CHUNK,))
-    Ts = Thread(target = udpStream)
-    Tr.setDaemon(True)
-    Ts.setDaemon(True)
-    Tr.start()
-    Ts.start()
-    Tr.join()
-    Ts.join()
+def main():
+    t_r = Thread(target = record)
+    t_s = Thread(target = upd_stream)
+    t_r.setDaemon(True)
+    t_s.setDaemon(True)
+    t_r.start()
+    t_s.start()
+    t_r.join()
+    t_s.join()
+
+if __name__ == '__main__':
+    main()
+
